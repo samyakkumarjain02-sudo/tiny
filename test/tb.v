@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-module tb;
+module tb_morse_codec;
 
     reg clk;
     reg rst_n;
