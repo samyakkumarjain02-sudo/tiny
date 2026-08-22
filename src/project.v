@@ -1,577 +1,376 @@
-module tt_um_morse_codec #(
-    parameter integer HUMAN_TICKS   = 3_000_000, // 60 ms @ 50 MHz = 20 WPM
-    parameter integer MACHINE_TICKS = 2          // Optimize using STA
+
+`default_nettype none
+
+module tt_um_samyak_krish_morse_codec #(
+    parameter integer HUMAN_TICKS   = 3_000_000, // 60 ms @ 50 MHz
+    parameter integer MACHINE_TICKS = 10,
+    parameter integer HUMAN_DOT_MIN = 2_000_000,
+    parameter integer HUMAN_DOT_MAX = 4_000_000,
+    parameter integer HUMAN_DASH_MIN = 5_000_000,
+    parameter integer HUMAN_DASH_MAX = 12_000_000,
+    parameter integer HUMAN_GAP_SYM_MAX = 2_000_000,
+    parameter integer HUMAN_GAP_CHAR_MIN = 2_000_001,
+    parameter integer HUMAN_GAP_CHAR_MAX = 5_000_000,
+    parameter integer HUMAN_GAP_WORD_MIN = 6_000_000
 )(
     input  wire       clk,
     input  wire       rst_n,
     input  wire       ena,
-
     input  wire [7:0] ui_in,
-    output reg  [7:0] uo_out,
-
+    output wire [7:0] uo_out,
     input  wire [7:0] uio_in,
-    output reg  [7:0] uio_out,
-    output reg  [7:0] uio_oe
+    output wire [7:0] uio_out,
+    output wire [7:0] uio_oe
 );
 
-    // ------------------------------------------------------------
-    // Pin assignment
-    //
-    // ui_in[6:0] = ASCII input
-    // ui_in[7]   = mode
-    //              0 = Human mode
-    //              1 = Machine mode
-    //
-    // uio[0]     = bidirectional Morse channel
-    // uio[1]     = TX/RX control
-    //              1 = TX
-    //              0 = RX
-    // uio[2]     = start pulse
-    //
-    // uo_out[6:0] = decoded ASCII
-    // uo_out[7]   = valid
-    // ------------------------------------------------------------
+    // ui_in[0] = START / DATA_VALID
+    // ui_in[1] = TX/RX: 1=TX, 0=RX
+    // ui_in[2] = MODE:   0=Human, 1=Machine
+    // ui_in[3] = local enable
+    // ui_in[7:4] reserved
 
-    wire mode_machine = ui_in[7];
-    wire [6:0] ascii_in = ui_in[6:0];
+    wire tx_mode = ui_in[1];
+    wire machine_mode = ui_in[2];
+    wire local_enable = ui_in[3];
+    wire start = ui_in[0];
 
-    wire tx_mode = uio_in[1];
-    wire start   = uio_in[2];
+    reg [7:0] uo_r;
+    reg [7:0] uio_out_r;
+    reg [7:0] uio_oe_r;
 
-    wire morse_in = uio_in[0];
+    assign uo_out  = uo_r;
+    assign uio_out = uio_out_r;
+    assign uio_oe  = uio_oe_r;
 
-    wire [31:0] TICKS =
-        mode_machine ? MACHINE_TICKS : HUMAN_TICKS;
+    localparam [2:0] TX_IDLE      = 3'd0;
+    localparam [2:0] TX_PULSE    = 3'd1;
+    localparam [2:0] TX_SYMGAP   = 3'd2;
+    localparam [2:0] TX_CHARGAP  = 3'd3;
+    localparam [2:0] TX_WORDGAP  = 3'd4;
 
+    reg [2:0] tx_state;
+    reg [31:0] tx_count;
+    reg [6:0] tx_ascii;
+    reg [3:0] tx_code;
+    reg [2:0] tx_len;
+    reg [2:0] tx_pos;
+    reg tx_last;
+    reg tx_morse;
+    reg start_d;
+    reg error_flag;
+    wire [6:0] tx_info = morse_info(uio_in[7:1]);
 
-    // ============================================================
-    // OUTPUT / STATUS
-    // ============================================================
+    function [6:0] morse_info;
+        input [6:0] c;
+        begin
+            // {length, code}; code is left-aligned, DOT=0, DASH=1.
+            case (c)
+                "A": morse_info = {3'd2,4'b0100};
+                "B": morse_info = {3'd4,4'b1000};
+                "C": morse_info = {3'd4,4'b1010};
+                "D": morse_info = {3'd3,4'b1000};
+                "E": morse_info = {3'd1,4'b0000};
+                "F": morse_info = {3'd4,4'b0010};
+                "G": morse_info = {3'd3,4'b1100};
+                "H": morse_info = {3'd4,4'b0000};
+                "I": morse_info = {3'd2,4'b0000};
+                "J": morse_info = {3'd4,4'b0111};
+                "K": morse_info = {3'd3,4'b1010};
+                "L": morse_info = {3'd4,4'b0100};
+                "M": morse_info = {3'd2,4'b1100};
+                "N": morse_info = {3'd2,4'b1000};
+                "O": morse_info = {3'd3,4'b1110};
+                "P": morse_info = {3'd4,4'b0110};
+                "Q": morse_info = {3'd4,4'b1101};
+                "R": morse_info = {3'd3,4'b0100};
+                "S": morse_info = {3'd3,4'b0000};
+                "T": morse_info = {3'd1,4'b1000};
+                "U": morse_info = {3'd3,4'b0010};
+                "V": morse_info = {3'd4,4'b0001};
+                "W": morse_info = {3'd3,4'b0110};
+                "X": morse_info = {3'd4,4'b1001};
+                "Y": morse_info = {3'd4,4'b1011};
+                "Z": morse_info = {3'd4,4'b1100};
+                default: morse_info = 7'd0;
+            endcase
+        end
+    endfunction
 
-    reg [6:0] ascii_out_reg;
-    reg       valid_reg;
-    reg       error_reg;
+    function [31:0] unit_ticks;
+        input mode;
+        begin
+            unit_ticks = mode ? MACHINE_TICKS : HUMAN_TICKS;
+        end
+    endfunction
 
-    always @(*) begin
+    // ---------------- Encoder ----------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            tx_state <= TX_IDLE;
+            tx_count <= 0;
+            tx_ascii <= 0;
+            tx_code <= 0;
+            tx_len <= 0;
+            tx_pos <= 0;
+            tx_last <= 0;
+            tx_morse <= 1'b0;
+            start_d <= 0;
+            error_flag <= 1'b0;
+        end else begin
+            start_d <= start;
 
-        uo_out = 8'b0;
+            if (!ena || !local_enable || !tx_mode) begin
+                tx_state <= TX_IDLE;
+                tx_count <= 0;
+                tx_morse <= 1'b0;
+            end else begin
+                case (tx_state)
+                    TX_IDLE: begin
+                        tx_morse <= 1'b0;
+                        tx_count <= 0;
+                        if (start && !start_d) begin
+                            tx_ascii <= uio_in[7:1];
+                            if (uio_in[7:1] == 7'd32) begin
+                                tx_state <= TX_WORDGAP;
+                                tx_count <= 0;
+                            end else begin
+                                tx_len <= tx_info[6:4];
+                                tx_code <= tx_info[3:0];
+                                if (tx_info[6:4] != 0) begin
+                                    tx_pos <= 0;
+                                    tx_last <= (tx_info[6:4] == 1);
+                                    tx_state <= TX_PULSE;
+                                end else begin
+                                    error_flag <= 1'b1;
+                                end
+                            end
+                        end
+                    end
 
-        uo_out[6:0] = ascii_out_reg;
-        uo_out[7]   = valid_reg;
+                    TX_PULSE: begin
+                        tx_morse <= 1'b1;
+                        if (tx_count + 1 >= (tx_code[3-tx_pos] ? (3*unit_ticks(machine_mode)) : unit_ticks(machine_mode))) begin
+                            tx_count <= 0;
+                            tx_morse <= 1'b0;
+                            if (tx_last)
+                                tx_state <= TX_CHARGAP;
+                            else
+                                tx_state <= TX_SYMGAP;
+                        end else begin
+                            tx_count <= tx_count + 1;
+                        end
+                    end
 
+                    TX_SYMGAP: begin
+                        tx_morse <= 1'b0;
+                        if (tx_count + 1 >= unit_ticks(machine_mode)) begin
+                            tx_count <= 0;
+                            tx_pos <= tx_pos + 1'b1;
+                            tx_last <= (tx_pos + 1 >= tx_len - 1);
+                            tx_state <= TX_PULSE;
+                        end else tx_count <= tx_count + 1;
+                    end
+
+                    TX_CHARGAP: begin
+                        tx_morse <= 1'b0;
+                        if (tx_count + 1 >= (3*unit_ticks(machine_mode))) begin
+                            tx_state <= TX_IDLE;
+                            tx_count <= 0;
+                        end else tx_count <= tx_count + 1;
+                    end
+
+                    TX_WORDGAP: begin
+                        tx_morse <= 1'b0;
+                        if (tx_count + 1 >= (7*unit_ticks(machine_mode))) begin
+                            tx_state <= TX_IDLE;
+                            tx_count <= 0;
+                        end else tx_count <= tx_count + 1;
+                    end
+
+                    default: tx_state <= TX_IDLE;
+                endcase
+            end
+        end
     end
 
+    // ---------------- Decoder ----------------
+    reg rx_prev;
+    reg [31:0] high_count;
+    reg [31:0] low_count;
+    reg [5:0] tree_node;
+    reg receiving_char;
+    reg [6:0] decoded_ascii;
+    reg gap_char_done;
+    reg valid_pulse;
+    reg error_pulse;
 
-    // ============================================================
-    // BIDIRECTIONAL MORSE PIN
-    // ============================================================
+    // Morse binary tree node mapping:
+    // root=1, DOT=left(2*n), DASH=right(2*n+1).
+    // Nodes 2..31 correspond to E,T,I,A,N,M,...,H/V/F/U...
+    function [6:0] node_ascii;
+        input [5:0] n;
+        begin
+            case (n)
+                2: node_ascii="E"; 3: node_ascii="T";
+                4: node_ascii="I"; 5: node_ascii="A";
+                6: node_ascii="N"; 7: node_ascii="M";
+                8: node_ascii="S"; 9: node_ascii="U";
+                10: node_ascii="R"; 11: node_ascii="W";
+                12: node_ascii="D"; 13: node_ascii="K";
+                14: node_ascii="G"; 15: node_ascii="O";
+                16: node_ascii="H"; 17: node_ascii="V";
+                18: node_ascii="F"; 19: node_ascii=7'd0;
+                20: node_ascii="L"; 21: node_ascii=7'd0;
+                22: node_ascii="P"; 23: node_ascii="J";
+                24: node_ascii="B"; 25: node_ascii="X";
+                26: node_ascii="C"; 27: node_ascii="Y";
+                28: node_ascii="Z"; 29: node_ascii="Q";
+                default: node_ascii=7'd0;
+            endcase
+        end
+    endfunction
 
-    reg morse_out_reg;
+    function [31:0] rx_dot_min;
+        input mode;
+        begin rx_dot_min = mode ? (MACHINE_TICKS/2) : HUMAN_DOT_MIN; end
+    endfunction
 
+    function [31:0] rx_dot_max;
+        input mode;
+        begin rx_dot_max = mode ? ((3*MACHINE_TICKS)/2) : HUMAN_DOT_MAX; end
+    endfunction
+
+    function [31:0] rx_dash_min;
+        input mode;
+        begin rx_dash_min = mode ? (2*MACHINE_TICKS) : HUMAN_DASH_MIN; end
+    endfunction
+
+    function [31:0] rx_dash_max;
+        input mode;
+        begin rx_dash_max = mode ? (4*MACHINE_TICKS) : HUMAN_DASH_MAX; end
+    endfunction
+
+    function [31:0] rx_char_min;
+        input mode;
+        begin rx_char_min = mode ? (2*MACHINE_TICKS) : HUMAN_GAP_CHAR_MIN; end
+    endfunction
+
+    function [31:0] rx_char_max;
+        input mode;
+        begin rx_char_max = mode ? (5*MACHINE_TICKS) : HUMAN_GAP_CHAR_MAX; end
+    endfunction
+
+    function [31:0] rx_word_min;
+        input mode;
+        begin rx_word_min = mode ? (6*MACHINE_TICKS) : HUMAN_GAP_WORD_MIN; end
+    endfunction
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            rx_prev <= 1'b0;
+            high_count <= 0;
+            low_count <= 0;
+            tree_node <= 1;
+            receiving_char <= 1'b0;
+            decoded_ascii <= 0;
+            gap_char_done <= 1'b0;
+            valid_pulse <= 1'b0;
+            error_pulse <= 1'b0;
+        end else begin
+            valid_pulse <= 1'b0;
+            error_pulse <= 1'b0;
+
+            if (!ena || !local_enable || tx_mode) begin
+                rx_prev <= 1'b0;
+                high_count <= 0;
+                low_count <= 0;
+                tree_node <= 1;
+                receiving_char <= 1'b0;
+                gap_char_done <= 1'b0;
+            end else begin
+                rx_prev <= uio_in[0];
+
+                if (uio_in[0]) begin
+                    low_count <= 0;
+                    high_count <= high_count + 1'b1;
+                end else begin
+                    if (rx_prev) begin
+                        // Falling edge: classify the completed HIGH pulse.
+                        if ((high_count >= rx_dot_min(machine_mode)) &&
+                            (high_count <= rx_dot_max(machine_mode))) begin
+                            tree_node <= tree_node << 1;
+                            receiving_char <= 1'b1;
+                            gap_char_done <= 1'b0;
+                        end else if ((high_count >= rx_dash_min(machine_mode)) &&
+                                     (high_count <= rx_dash_max(machine_mode))) begin
+                            tree_node <= (tree_node << 1) | 1'b1;
+                            receiving_char <= 1'b1;
+                            gap_char_done <= 1'b0;
+                        end else begin
+                            error_pulse <= 1'b1;
+                            tree_node <= 1;
+                            receiving_char <= 1'b0;
+                        end
+                    end
+
+                    high_count <= 0;
+                    low_count <= low_count + 1'b1;
+
+                    // A new pulse ends any pending word-gap interpretation.
+                    if (rx_prev)
+                        gap_char_done <= 1'b0;
+
+                    // First detect a word gap. If the character was already
+                    // completed at the character-gap threshold, output space now.
+                    if (gap_char_done &&
+                        (low_count >= rx_word_min(machine_mode))) begin
+                        decoded_ascii <= 7'd32;
+                        valid_pulse <= 1'b1;
+                        gap_char_done <= 1'b0;
+                    end
+                    // Character gap: finish the current Morse character.
+                    else if (receiving_char &&
+                             (low_count >= rx_char_min(machine_mode))) begin
+                        decoded_ascii <= node_ascii(tree_node);
+                        if (node_ascii(tree_node) != 0) begin
+                            valid_pulse <= 1'b1;
+                        end else begin
+                            error_pulse <= 1'b1;
+                        end
+                        tree_node <= 1;
+                        receiving_char <= 1'b0;
+                        gap_char_done <= 1'b1;
+                    end
+                end
+            end
+        end
+    end
+
+    // ---------------- Outputs / I/O direction ----------------
     always @(*) begin
-
-        uio_out = 8'b0;
-        uio_oe  = 8'b0;
+        uio_out_r = 8'b0;
+        uio_oe_r  = 8'b0;
 
         if (tx_mode) begin
-            uio_out[0] = morse_out_reg;
-            uio_oe[0]  = 1'b1;
+            // TX: uio[7:1] are inputs, uio[0] drives Morse.
+            uio_oe_r[0] = 1'b1;
+            uio_out_r[0] = tx_morse;
+        end else begin
+            // RX: uio[7:1] drive decoded ASCII, uio[0] is input.
+            uio_oe_r[7:1] = 7'b1111111;
+            uio_out_r[7:1] = decoded_ascii;
         end
 
+        if (!ena || !local_enable)
+            uio_oe_r = 8'b0;
     end
 
-
-    // ============================================================
-    // MORSE TREE
-    //
-    // Binary heap representation:
-    //
-    //              ROOT
-    //             /    \
-    //            E      T
-    //           / \    / \
-    //          I   A  N   M
-    //
-    // DOT  = LEFT
-    // DASH = RIGHT
-    //
-    // Node numbers:
-    //
-    // E=2  T=3
-    // I=4  A=5  N=6  M=7
-    // S=8  U=9  R=10 W=11
-    // D=12 K=13 G=14 O=15
-    // H=16 V=17 F=18
-    // L=20 P=22 J=23
-    // B=24 X=25 C=26 Y=27
-    // Z=28 Q=29
-    // ============================================================
-
-
-    // ------------------------------------------------------------
-    // ASCII -> Morse tree node
-    // ------------------------------------------------------------
-
-    function [4:0] ascii_to_node;
-
-        input [6:0] ascii;
-
-        begin
-
-            case (ascii)
-
-                "A": ascii_to_node = 5'd5;
-                "B": ascii_to_node = 5'd24;
-                "C": ascii_to_node = 5'd26;
-                "D": ascii_to_node = 5'd12;
-                "E": ascii_to_node = 5'd2;
-                "F": ascii_to_node = 5'd18;
-                "G": ascii_to_node = 5'd14;
-                "H": ascii_to_node = 5'd16;
-                "I": ascii_to_node = 5'd4;
-                "J": ascii_to_node = 5'd23;
-                "K": ascii_to_node = 5'd13;
-                "L": ascii_to_node = 5'd20;
-                "M": ascii_to_node = 5'd7;
-                "N": ascii_to_node = 5'd6;
-                "O": ascii_to_node = 5'd15;
-                "P": ascii_to_node = 5'd22;
-                "Q": ascii_to_node = 5'd29;
-                "R": ascii_to_node = 5'd10;
-                "S": ascii_to_node = 5'd8;
-                "T": ascii_to_node = 5'd3;
-                "U": ascii_to_node = 5'd9;
-                "V": ascii_to_node = 5'd17;
-                "W": ascii_to_node = 5'd11;
-                "X": ascii_to_node = 5'd25;
-                "Y": ascii_to_node = 5'd27;
-                "Z": ascii_to_node = 5'd28;
-
-                default:
-                    ascii_to_node = 5'd0;
-
-            endcase
-
-        end
-
-    endfunction
-
-
-    // ------------------------------------------------------------
-    // Morse tree node -> ASCII
-    // ------------------------------------------------------------
-
-    function [6:0] node_to_ascii;
-
-        input [4:0] node;
-
-        begin
-
-            case (node)
-
-                5'd2:  node_to_ascii = "E";
-                5'd3:  node_to_ascii = "T";
-
-                5'd4:  node_to_ascii = "I";
-                5'd5:  node_to_ascii = "A";
-                5'd6:  node_to_ascii = "N";
-                5'd7:  node_to_ascii = "M";
-
-                5'd8:  node_to_ascii = "S";
-                5'd9:  node_to_ascii = "U";
-                5'd10: node_to_ascii = "R";
-                5'd11: node_to_ascii = "W";
-
-                5'd12: node_to_ascii = "D";
-                5'd13: node_to_ascii = "K";
-                5'd14: node_to_ascii = "G";
-                5'd15: node_to_ascii = "O";
-
-                5'd16: node_to_ascii = "H";
-                5'd17: node_to_ascii = "V";
-                5'd18: node_to_ascii = "F";
-
-                5'd20: node_to_ascii = "L";
-
-                5'd22: node_to_ascii = "P";
-                5'd23: node_to_ascii = "J";
-
-                5'd24: node_to_ascii = "B";
-                5'd25: node_to_ascii = "X";
-                5'd26: node_to_ascii = "C";
-                5'd27: node_to_ascii = "Y";
-                5'd28: node_to_ascii = "Z";
-                5'd29: node_to_ascii = "Q";
-
-                default:
-                    node_to_ascii = 7'b0;
-
-            endcase
-
-        end
-
-    endfunction
-
-
-    // ------------------------------------------------------------
-    // Return Morse tree depth
-    // ------------------------------------------------------------
-
-    function [3:0] node_depth;
-
-        input [4:0] node;
-
-        begin
-
-            if (node < 2)
-                node_depth = 0;
-            else if (node < 4)
-                node_depth = 1;
-            else if (node < 8)
-                node_depth = 2;
-            else if (node < 16)
-                node_depth = 3;
-            else
-                node_depth = 4;
-
-        end
-
-    endfunction
-
-
-    // ============================================================
-    // ENCODER
-    // ============================================================
-
-    reg [4:0] enc_node;
-    reg [3:0] enc_pos;
-
-    reg [31:0] enc_timer;
-
-    reg [2:0] enc_state;
-
-    localparam ENC_IDLE = 3'd0;
-    localparam ENC_PULSE = 3'd1;
-    localparam ENC_EGAP = 3'd2;
-    localparam ENC_CGAP = 3'd3;
-
-    wire [4:0] ascii_node = ascii_to_node(ascii_in);
-
-    wire [3:0] ascii_depth = node_depth(enc_node);
-
-
-    // ------------------------------------------------------------
-    // Encoder
-    // ------------------------------------------------------------
-
-    always @(posedge clk or negedge rst_n) begin
-
-        if (!rst_n) begin
-
-            enc_node     <= 0;
-            enc_pos      <= 0;
-            enc_timer    <= 0;
-            enc_state    <= ENC_IDLE;
-            morse_out_reg <= 0;
-
-        end
-
-        else if (ena && tx_mode) begin
-
-            case (enc_state)
-
-                ENC_IDLE: begin
-
-                    morse_out_reg <= 0;
-                    enc_timer     <= 0;
-
-                    if (start && ascii_node != 0) begin
-
-                        enc_node <= ascii_node;
-                        enc_pos  <= 0;
-
-                        enc_state <= ENC_PULSE;
-
-                    end
-
-                end
-
-
-                ENC_PULSE: begin
-
-                    /*
-                     * Extract path bit from tree node.
-                     * 0 = DOT
-                     * 1 = DASH
-                     */
-
-                    if (
-                        enc_node[
-                            (node_depth(enc_node)-1)-enc_pos
-                        ]
-                    ) begin
-
-                        // DASH = 3T
-
-                        morse_out_reg <= 1;
-
-                        if (enc_timer >= (3*TICKS)-1) begin
-
-                            enc_timer     <= 0;
-                            morse_out_reg <= 0;
-                            enc_state     <= ENC_EGAP;
-
-                        end
-                        else begin
-
-                            enc_timer <= enc_timer + 1'b1;
-
-                        end
-
-                    end
-
-                    else begin
-
-                        // DOT = 1T
-
-                        morse_out_reg <= 1;
-
-                        if (enc_timer >= TICKS-1) begin
-
-                            enc_timer     <= 0;
-                            morse_out_reg <= 0;
-                            enc_state     <= ENC_EGAP;
-
-                        end
-                        else begin
-
-                            enc_timer <= enc_timer + 1'b1;
-
-                        end
-
-                    end
-
-                end
-
-
-                ENC_EGAP: begin
-
-                    // Gap between Morse elements = 1T
-
-                    morse_out_reg <= 0;
-
-                    if (enc_timer >= TICKS-1) begin
-
-                        enc_timer <= 0;
-
-                        if (enc_pos + 1 >= node_depth(enc_node)) begin
-
-                            enc_state <= ENC_CGAP;
-
-                        end
-                        else begin
-
-                            enc_pos <= enc_pos + 1'b1;
-                            enc_state <= ENC_PULSE;
-
-                        end
-
-                    end
-                    else begin
-
-                        enc_timer <= enc_timer + 1'b1;
-
-                    end
-
-                end
-
-
-                ENC_CGAP: begin
-
-                    // Character gap = 3T
-
-                    morse_out_reg <= 0;
-
-                    if (enc_timer >= (3*TICKS)-1) begin
-
-                        enc_timer <= 0;
-                        enc_state <= ENC_IDLE;
-
-                    end
-                    else begin
-
-                        enc_timer <= enc_timer + 1'b1;
-
-                    end
-
-                end
-
-
-                default:
-                    enc_state <= ENC_IDLE;
-
-            endcase
-
-        end
-
-    end
-
-
-    // ============================================================
-    // DECODER
-    // ============================================================
-
-    reg [4:0] dec_node;
-
-    reg [31:0] pulse_timer;
-    reg [31:0] gap_timer;
-
-    reg previous_morse;
-
-    reg character_done;
-    reg word_done;
-
-
-    // ------------------------------------------------------------
-    // Decoder
-    // ------------------------------------------------------------
-
-    always @(posedge clk or negedge rst_n) begin
-
-        if (!rst_n) begin
-
-            dec_node       <= 5'd1;
-
-            pulse_timer    <= 0;
-            gap_timer      <= 0;
-
-            previous_morse <= 0;
-
-            character_done <= 0;
-            word_done      <= 0;
-
-            ascii_out_reg  <= 0;
-
-            valid_reg      <= 0;
-            error_reg      <= 0;
-
-        end
-
-        else if (ena && !tx_mode) begin
-
-            valid_reg <= 0;
-
-            // ----------------------------------------------------
-            // HIGH pulse
-            // ----------------------------------------------------
-
-            if (morse_in) begin
-
-                pulse_timer <= pulse_timer + 1'b1;
-                gap_timer   <= 0;
-
-                character_done <= 0;
-                word_done      <= 0;
-
-            end
-
-
-            // ----------------------------------------------------
-            // Falling edge
-            // ----------------------------------------------------
-
-            else if (previous_morse) begin
-
-                // DOT
-                if (pulse_timer < (2*TICKS)) begin
-
-                    if ((dec_node << 1) <= 29)
-                        dec_node <= dec_node << 1;
-                    else
-                        error_reg <= 1;
-
-                end
-
-                // DASH
-                else if (pulse_timer < (5*TICKS)) begin
-
-                    if (((dec_node << 1) + 1) <= 29)
-                        dec_node <= (dec_node << 1) + 1'b1;
-                    else
-                        error_reg <= 1;
-
-                end
-
-                // Invalid pulse
-                else begin
-
-                    error_reg <= 1;
-                    dec_node  <= 1;
-
-                end
-
-                pulse_timer <= 0;
-
-            end
-
-
-            // ----------------------------------------------------
-            // LOW gap
-            // ----------------------------------------------------
-
-            else begin
-
-                if (gap_timer < (7*TICKS))
-                    gap_timer <= gap_timer + 1'b1;
-
-
-                // Character gap = 3T
-
-                if (
-                    gap_timer >= (3*TICKS)-1 &&
-                    !character_done &&
-                    dec_node != 1
-                ) begin
-
-                    ascii_out_reg <= node_to_ascii(dec_node);
-
-                    valid_reg <= 1;
-
-                    character_done <= 1;
-
-                    dec_node <= 1;
-
-                end
-
-
-                // Word gap = 7T
-
-                if (
-                    gap_timer >= (7*TICKS)-1 &&
-                    !word_done
-                ) begin
-
-                    ascii_out_reg <= " ";
-
-                    valid_reg <= 1;
-
-                    word_done <= 1;
-
-                    dec_node <= 1;
-
-                end
-
-            end
-
-            previous_morse <= morse_in;
-
-        end
-
+    always @(*) begin
+        uo_r = 8'b0;
+        uo_r[0] = valid_pulse;
+        uo_r[1] = error_flag | error_pulse;
     end
 
 endmodule
 
-  // List all unused inputs to prevent warnings
-  wire _unused = &{ena, clk, rst_n, 1'b0};
-
-endmodule
+`default_nettype wire
