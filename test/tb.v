@@ -53,7 +53,7 @@ module tb_morse_codec;
     // ------------------------------------------------------------
     // Encoder / Transmitter chip
     // ------------------------------------------------------------
-    tt_um_samyak_morse_codec chip_tx (
+    tt_um_samyak_krish_morse_codec chip_tx (
         .clk     (clk),
         .rst_n   (rst_n),
         .ena     (ena),
@@ -67,7 +67,7 @@ module tb_morse_codec;
     // ------------------------------------------------------------
     // Decoder / Receiver chip
     // ------------------------------------------------------------
-    tt_um_samyak_morse_codec chip_rx (
+    tt_um_samyak_krish_morse_codec chip_rx (
         .clk     (clk),
         .rst_n   (rst_n),
         .ena     (ena),
