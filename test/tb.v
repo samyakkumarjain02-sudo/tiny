@@ -1,389 +1,131 @@
+
 `timescale 1ns/1ps
+`default_nettype none
 
 module tb_morse_codec;
 
-    // ------------------------------------------------------------
-    // Simulation timing
-    // ------------------------------------------------------------
+    reg clk = 0;
+    reg rst_n = 0;
+    reg ena = 1;
 
-    localparam HUMAN_TICKS   = 3;
-    localparam MACHINE_TICKS = 1;
+    reg [7:0] ui_tx = 0;
+    reg [7:0] ui_rx = 0;
 
+    wire [7:0] uo_tx, uo_rx;
+    wire [7:0] uio_tx_out, uio_rx_out;
+    wire [7:0] uio_tx_oe, uio_rx_oe;
 
-    // ------------------------------------------------------------
-    // Common signals
-    // ------------------------------------------------------------
+    tri [7:0] tx_bus;
+    tri [7:0] rx_bus;
 
-    reg clk;
-    reg rst_n;
-    reg ena;
+    wire morse_wire;
+    assign morse_wire = uio_tx_oe[0] ? uio_tx_out[0] : 1'bz;
+    assign morse_wire = uio_rx_oe[0] ? uio_rx_out[0] : 1'bz;
 
+    assign tx_bus[7:1] = uio_tx_oe[7:1] ? uio_tx_out[7:1] : 7'bz;
+    assign rx_bus[7:1] = uio_rx_oe[7:1] ? uio_rx_out[7:1] : 7'bz;
 
-    // ============================================================
-    // ENCODER
-    // ============================================================
+    wire [7:0] uio_tx_in = {tx_bus[7:1], morse_wire};
+    wire [7:0] uio_rx_in = {rx_bus[7:1], morse_wire};
 
-    reg  [7:0] enc_ui;
-    reg  [7:0] enc_uio_in;
-
-    wire [7:0] enc_uo;
-    wire [7:0] enc_uio_out;
-    wire [7:0] enc_uio_oe;
-
-
-    // ============================================================
-    // DECODER
-    // ============================================================
-
-    reg  [7:0] dec_ui;
-    reg  [7:0] dec_uio_in;
-
-    wire [7:0] dec_uo;
-    wire [7:0] dec_uio_out;
-    wire [7:0] dec_uio_oe;
-
-
-    // ------------------------------------------------------------
-    // Morse connection between encoder and decoder
-    // ------------------------------------------------------------
-
-    always @(*) begin
-
-        dec_uio_in[0] = enc_uio_out[0];
-
-    end
-
-
-    // ============================================================
-    // ENCODER DUT
-    // ============================================================
-
-    tt_um_morse_codec #(
-        .HUMAN_TICKS(HUMAN_TICKS),
-        .MACHINE_TICKS(MACHINE_TICKS)
-    ) encoder (
-        .clk     (clk),
-        .rst_n   (rst_n),
-        .ena     (ena),
-
-        .ui_in   (enc_ui),
-        .uo_out  (enc_uo),
-
-        .uio_in  (enc_uio_in),
-        .uio_out (enc_uio_out),
-        .uio_oe  (enc_uio_oe)
+    tt_um_samyak_krish_morse_codec #(
+        .HUMAN_TICKS(10),
+        .MACHINE_TICKS(2),
+        .HUMAN_DOT_MIN(7),
+        .HUMAN_DOT_MAX(13),
+        .HUMAN_DASH_MIN(22),
+        .HUMAN_DASH_MAX(38),
+        .HUMAN_GAP_SYM_MAX(13),
+        .HUMAN_GAP_CHAR_MIN(14),
+        .HUMAN_GAP_CHAR_MAX(20),
+        .HUMAN_GAP_WORD_MIN(31)
+    ) tx (
+        .clk(clk), .rst_n(rst_n), .ena(ena),
+        .ui_in(ui_tx), .uo_out(uo_tx),
+        .uio_in(uio_tx_in), .uio_out(uio_tx_out), .uio_oe(uio_tx_oe)
     );
 
-
-    // ============================================================
-    // DECODER DUT
-    // ============================================================
-
-    tt_um_morse_codec #(
-        .HUMAN_TICKS(HUMAN_TICKS),
-        .MACHINE_TICKS(MACHINE_TICKS)
-    ) decoder (
-        .clk     (clk),
-        .rst_n   (rst_n),
-        .ena     (ena),
-
-        .ui_in   (dec_ui),
-        .uo_out  (dec_uo),
-
-        .uio_in  (dec_uio_in),
-        .uio_out (dec_uio_out),
-        .uio_oe  (dec_uio_oe)
+    tt_um_samyak_morse_codec #(
+        .HUMAN_TICKS(10),
+        .MACHINE_TICKS(2),
+        .HUMAN_DOT_MIN(7),
+        .HUMAN_DOT_MAX(13),
+        .HUMAN_DASH_MIN(22),
+        .HUMAN_DASH_MAX(38),
+        .HUMAN_GAP_SYM_MAX(13),
+        .HUMAN_GAP_CHAR_MIN(14),
+        .HUMAN_GAP_CHAR_MAX(20),
+        .HUMAN_GAP_WORD_MIN(31)
+    ) rx (
+        .clk(clk), .rst_n(rst_n), .ena(ena),
+        .ui_in(ui_rx), .uo_out(uo_rx),
+        .uio_in(uio_rx_in), .uio_out(uio_rx_out), .uio_oe(uio_rx_oe)
     );
-
-
-    // ============================================================
-    // CLOCK
-    // ============================================================
 
     always #5 clk = ~clk;
 
-
-    // ============================================================
-    // RESET
-    // ============================================================
-
-    task reset_dut;
-
+    task send_char;
+        input [6:0] c;
         begin
-
-            rst_n = 0;
-
-            #50;
-
-            rst_n = 1;
-
-            #20;
-
-        end
-
-    endtask
-
-
-    // ============================================================
-    // TRANSMIT ONE ASCII CHARACTER
-    // ============================================================
-
-    task transmit_ascii;
-
-        input [6:0] character;
-
-        begin
-
-            enc_ui[6:0] = character;
-
-            // Start pulse
-            enc_uio_in[2] = 1;
-
+            ui_tx[7:1] = c;
+            ui_tx[0] = 1'b1;
             @(posedge clk);
-
-            enc_uio_in[2] = 0;
-
+            ui_tx[0] = 1'b0;
+            wait (tx.uio_oe[0] == 1'b0);
+            repeat (2) @(posedge clk);
         end
-
     endtask
 
-
-    // ============================================================
-    // WAIT FOR DECODED ASCII
-    // ============================================================
-
-    task wait_for_ascii;
-
+    task check_char;
         input [6:0] expected;
-
-        integer timeout;
-
         begin
-
-            timeout = 0;
-
-            while (!dec_uo[7] && timeout < 1000) begin
-
-                @(posedge clk);
-
-                timeout = timeout + 1;
-
-            end
-
-
-            if (timeout >= 1000) begin
-
-                $display("ERROR: Decoder timeout");
-
-            end
-
-            else if (dec_uo[6:0] == expected) begin
-
-                $display(
-                    "PASS: Received ASCII = %c",
-                    expected
-                );
-
-            end
-
-            else begin
-
-                $display(
-                    "FAIL: Expected %c, Received %c",
-                    expected,
-                    dec_uo[6:0]
-                );
-
-            end
-
+            wait (uo_rx[0] === 1'b1);
+            if (rx.decoded_ascii === expected)
+                $display("PASS: decoded %c", expected);
+            else
+                $display("FAIL: expected %c, got %c", expected, rx.decoded_ascii);
+            @(posedge clk);
         end
-
     endtask
 
-
-    // ============================================================
-    // HUMAN MODE TEST
-    // ============================================================
-
-    task test_human_mode;
-
+    task run_mode;
+        input machine;
+        input [8*5-1:0] label;
         begin
+            $display("\n--- %s MODE ---", label);
+            ui_tx[1] = 1'b1;
+            ui_rx[1] = 1'b0;
+            ui_tx[2] = machine;
+            ui_rx[2] = machine;
+            ui_tx[3] = 1'b1;
+            ui_rx[3] = 1'b1;
 
-            $display("");
-            $display("--------------------------------");
-            $display(" HUMAN MODE TEST");
-            $display("--------------------------------");
+            send_char("S");
+            check_char("S");
 
+            send_char("O");
+            check_char("O");
 
-            // Human mode
-            enc_ui[7] = 0;
-            dec_ui[7] = 0;
-
-
-            // Encoder
-            enc_uio_in[1] = 1;
-
-            // Decoder
-            dec_uio_in[1] = 0;
-
-
-            // Test A = .-
-            $display("Sending A ...");
-
-            transmit_ascii("A");
-
-            wait_for_ascii("A");
-
-
-            // Test S = ...
-            $display("Sending S ...");
-
-            transmit_ascii("S");
-
-            wait_for_ascii("S");
-
-
-            // Test O = ---
-            $display("Sending O ...");
-
-            transmit_ascii("O");
-
-            wait_for_ascii("O");
-
-
-            $display("Human mode test complete.");
-
+            send_char("S");
+            check_char("S");
         end
-
     endtask
-
-
-    // ============================================================
-    // MACHINE MODE TEST
-    // ============================================================
-
-    task test_machine_mode;
-
-        begin
-
-            $display("");
-            $display("--------------------------------");
-            $display(" MACHINE MODE TEST");
-            $display("--------------------------------");
-
-
-            // Machine mode
-            enc_ui[7] = 1;
-            dec_ui[7] = 1;
-
-
-            // Encoder
-            enc_uio_in[1] = 1;
-
-            // Decoder
-            dec_uio_in[1] = 0;
-
-
-            // Test H
-            $display("Sending H ...");
-
-            transmit_ascii("H");
-
-            wait_for_ascii("H");
-
-
-            // Test E
-            $display("Sending E ...");
-
-            transmit_ascii("E");
-
-            wait_for_ascii("E");
-
-
-            // Test L
-            $display("Sending L ...");
-
-            transmit_ascii("L");
-
-            wait_for_ascii("L");
-
-
-            // Test L
-            $display("Sending L ...");
-
-            transmit_ascii("L");
-
-            wait_for_ascii("L");
-
-
-            // Test O
-            $display("Sending O ...");
-
-            transmit_ascii("O");
-
-            wait_for_ascii("O");
-
-
-            $display("Machine mode test complete.");
-
-        end
-
-    endtask
-
-
-    // ============================================================
-    // MAIN TEST
-    // ============================================================
 
     initial begin
+        ui_tx[3] = 1;
+        ui_rx[3] = 1;
+        #20;
+        rst_n = 1;
+        #20;
 
-        // Initial values
+        run_mode(1'b0, "HUMAN");
+        run_mode(1'b1, "MACHINE");
 
-        clk = 0;
-
-        rst_n = 0;
-
-        ena = 1;
-
-
-        enc_ui = 0;
-        dec_ui = 0;
-
-        enc_uio_in = 0;
-        dec_uio_in = 0;
-
-
-        // Reset
-
-        reset_dut();
-
-
-        // Human mode
-
-        test_human_mode();
-
-
-        // Reset between modes
-
-        reset_dut();
-
-
-        // Machine mode
-
-        test_machine_mode();
-
-
-        // Finish
-
-        $display("");
-        $display("--------------------------------");
-        $display(" ALL TESTS COMPLETE");
-        $display("--------------------------------");
-
-        #100;
-
+        $display("\nAll requested basic encoder/decoder tests completed.");
+        #50;
         $finish;
-
     end
 
 endmodule
+
+`default_nettype wire
