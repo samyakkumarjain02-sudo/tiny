@@ -107,7 +107,7 @@ module tt_um_samyak_krish_morse_codec #(
         if (!rst_n) begin
             tx_state <= TX_IDLE;
             tx_count <= 0;
-            tx_ascii <= 0;
+        
             tx_code <= 0;
             tx_len <= 0;
             tx_pos <= 0;
@@ -314,11 +314,12 @@ module tt_um_samyak_krish_morse_codec #(
             
                     // First detect a word gap. If the character was already
                     // completed at the character-gap threshold, output space now.
-                    if (gap_char_done &&
-                        (low_count >= rx_word_min(machine_mode))) begin
-                        decoded_ascii <= 7'd32;
-                        valid_pulse <= 1'b1;
-                                end
+                    if (low_count >= rx_word_min(machine_mode)) begin
+    decoded_ascii <= 7'd32;
+    valid_pulse <= 1'b1;
+    tree_node <= 1;
+    receiving_char <= 1'b0;
+end
                     // Character gap: finish the current Morse character.
                     else if (receiving_char &&
                              (low_count >= rx_char_min(machine_mode))) begin
