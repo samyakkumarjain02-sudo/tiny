@@ -1,7 +1,7 @@
 
 `default_nettype none
 
-module tt_um_samyak_morse_krish_codec #(
+module tt_um_samyak_krish_morse_codec #(
     parameter integer HUMAN_TICKS   = 3_000_000, // 60 ms @ 50 MHz
     parameter integer MACHINE_TICKS = 10,
     parameter integer HUMAN_DOT_MIN = 2_000_000,
