@@ -45,7 +45,7 @@ module tb_morse_codec;
         .uio_in(uio_tx_in), .uio_out(uio_tx_out), .uio_oe(uio_tx_oe)
     );
 
-    tt_um_samyak_morse_codec #(
+    tt_um_samyak_krish_morse_codec #(
         .HUMAN_TICKS(10),
         .MACHINE_TICKS(2),
         .HUMAN_DOT_MIN(7),
