@@ -17,18 +17,18 @@ The design supports two modes. Human Mode uses standard Morse timing with timing
 The same chip can operate as a transmitter or receiver. ASCII data is converted to timed Morse pulses for transmission, and received Morse pulses are measured and decoded back into ASCII. Two identical chips can communicate through a single bidirectional Morse channel.
 
 ## Design Summary
-- **Top module: tt_um_samyak_morse_codec
-- **Technology: SkyWater 130nm
-- **Clock: 50 MHz
-- **Tile: 1×1
-- **Architecture: Binary-tree based
-- **Interface: 7-bit bidirectional ASCII + 1-bit bidirectional Morse
-- **Modes: Human and Machine
-- **Encoding: ASCII → Morse
-- **Decoding: Morse → ASCII
-- **Signaling: Pulse duration
-- **Characters: A–Z
-- **Verification: RTL simulation, synthesis and STA
+- Top module: tt_um_samyak_morse_codec
+- Technology: SkyWater 130nm
+- Clock: 50 MHz
+- Tile: 1×1
+- Architecture: Binary-tree based
+- Interface: 7-bit bidirectional ASCII + 1-bit bidirectional Morse
+- Modes: Human and Machine
+- Encoding: ASCII → Morse
+- Decoding: Morse → ASCII
+- Signaling: Pulse duration
+- Characters: A–Z
+- Verification: RTL simulation, synthesis and STA
   
 ## What is Tiny Tapeout?
 
