@@ -1,7 +1,7 @@
 
 `default_nettype none
 
-module tt_um_samyak_krish_morse_codec #(
+module tt_um_samyak_morse_codec #(
     parameter integer HUMAN_TICKS   = 3_000_000, // 60 ms @ 50 MHz
     parameter integer MACHINE_TICKS = 10,
     parameter integer HUMAN_DOT_MIN = 2_000_000,
@@ -49,9 +49,8 @@ module tt_um_samyak_krish_morse_codec #(
     localparam [2:0] TX_WORDGAP  = 3'd4;
 
     reg [2:0] tx_state;
-    reg [31:0] tx_count;
-    reg [6:0] tx_ascii;
-    reg [3:0] tx_code;
+    reg [23:0] tx_count;
+        reg [3:0] tx_code;
     reg [2:0] tx_len;
     reg [2:0] tx_pos;
     reg tx_last;
@@ -96,7 +95,7 @@ module tt_um_samyak_krish_morse_codec #(
         end
     endfunction
 
-    function [31:0] unit_ticks;
+    function [23:0] unit_ticks;
         input mode;
         begin
             unit_ticks = mode ? MACHINE_TICKS : HUMAN_TICKS;
@@ -129,7 +128,6 @@ module tt_um_samyak_krish_morse_codec #(
                         tx_morse <= 1'b0;
                         tx_count <= 0;
                         if (start && !start_d) begin
-                            tx_ascii <= uio_in[7:1];
                             if (uio_in[7:1] == 7'd32) begin
                                 tx_state <= TX_WORDGAP;
                                 tx_count <= 0;
@@ -195,12 +193,11 @@ module tt_um_samyak_krish_morse_codec #(
 
     // ---------------- Decoder ----------------
     reg rx_prev;
-    reg [31:0] high_count;
-    reg [31:0] low_count;
+    reg [23:0] high_count;
+    reg [23:0] low_count;
     reg [5:0] tree_node;
     reg receiving_char;
     reg [6:0] decoded_ascii;
-    reg gap_char_done;
     reg valid_pulse;
     reg error_pulse;
 
@@ -230,37 +227,37 @@ module tt_um_samyak_krish_morse_codec #(
         end
     endfunction
 
-    function [31:0] rx_dot_min;
+    function [23:0] rx_dot_min;
         input mode;
         begin rx_dot_min = mode ? (MACHINE_TICKS/2) : HUMAN_DOT_MIN; end
     endfunction
 
-    function [31:0] rx_dot_max;
+    function [23:0] rx_dot_max;
         input mode;
         begin rx_dot_max = mode ? ((3*MACHINE_TICKS)/2) : HUMAN_DOT_MAX; end
     endfunction
 
-    function [31:0] rx_dash_min;
+    function [23:0] rx_dash_min;
         input mode;
         begin rx_dash_min = mode ? (2*MACHINE_TICKS) : HUMAN_DASH_MIN; end
     endfunction
 
-    function [31:0] rx_dash_max;
+    function [23:0] rx_dash_max;
         input mode;
         begin rx_dash_max = mode ? (4*MACHINE_TICKS) : HUMAN_DASH_MAX; end
     endfunction
 
-    function [31:0] rx_char_min;
+    function [23:0] rx_char_min;
         input mode;
         begin rx_char_min = mode ? (2*MACHINE_TICKS) : HUMAN_GAP_CHAR_MIN; end
     endfunction
 
-    function [31:0] rx_char_max;
+    function [23:0] rx_char_max;
         input mode;
         begin rx_char_max = mode ? (5*MACHINE_TICKS) : HUMAN_GAP_CHAR_MAX; end
     endfunction
 
-    function [31:0] rx_word_min;
+    function [23:0] rx_word_min;
         input mode;
         begin rx_word_min = mode ? (6*MACHINE_TICKS) : HUMAN_GAP_WORD_MIN; end
     endfunction
@@ -273,7 +270,6 @@ module tt_um_samyak_krish_morse_codec #(
             tree_node <= 1;
             receiving_char <= 1'b0;
             decoded_ascii <= 0;
-            gap_char_done <= 1'b0;
             valid_pulse <= 1'b0;
             error_pulse <= 1'b0;
         end else begin
@@ -286,8 +282,7 @@ module tt_um_samyak_krish_morse_codec #(
                 low_count <= 0;
                 tree_node <= 1;
                 receiving_char <= 1'b0;
-                gap_char_done <= 1'b0;
-            end else begin
+                end else begin
                 rx_prev <= uio_in[0];
 
                 if (uio_in[0]) begin
@@ -300,13 +295,11 @@ module tt_um_samyak_krish_morse_codec #(
                             (high_count <= rx_dot_max(machine_mode))) begin
                             tree_node <= tree_node << 1;
                             receiving_char <= 1'b1;
-                            gap_char_done <= 1'b0;
-                        end else if ((high_count >= rx_dash_min(machine_mode)) &&
+                                        end else if ((high_count >= rx_dash_min(machine_mode)) &&
                                      (high_count <= rx_dash_max(machine_mode))) begin
                             tree_node <= (tree_node << 1) | 1'b1;
                             receiving_char <= 1'b1;
-                            gap_char_done <= 1'b0;
-                        end else begin
+                                        end else begin
                             error_pulse <= 1'b1;
                             tree_node <= 1;
                             receiving_char <= 1'b0;
@@ -318,16 +311,14 @@ module tt_um_samyak_krish_morse_codec #(
 
                     // A new pulse ends any pending word-gap interpretation.
                     if (rx_prev)
-                        gap_char_done <= 1'b0;
-
+            
                     // First detect a word gap. If the character was already
                     // completed at the character-gap threshold, output space now.
                     if (gap_char_done &&
                         (low_count >= rx_word_min(machine_mode))) begin
                         decoded_ascii <= 7'd32;
                         valid_pulse <= 1'b1;
-                        gap_char_done <= 1'b0;
-                    end
+                                end
                     // Character gap: finish the current Morse character.
                     else if (receiving_char &&
                              (low_count >= rx_char_min(machine_mode))) begin
