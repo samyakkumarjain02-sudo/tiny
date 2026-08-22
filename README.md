@@ -1,5 +1,27 @@
 ![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
 
+# A Binary-Tree-Based Dual-Mode Morse Communication Engine with Pulse-Duration Encoding
+
+Tiny Tapeout submission, SkyWater 130nm
+
+## What is this?
+
+This project implements a compact RTL-based **dual-mode Morse Code Encoder/Decoder** using a binary-tree architecture and pulse-duration-based communication.
+
+The same hardware supports both transmission and reception:
+
+ASCII → Morse → Transmission
+
+Morse → ASCII → Reception
+
+The design operates in two timing modes:
+
+- **Human Mode** — supports normal human-readable Morse timing with timing tolerance.
+- **Machine Mode** — uses reduced pulse durations for high-speed machine-to-machine communication.
+
+Morse is represented physically using **pulse duration** rather than a fixed binary representation. Short pulses represent dots and long pulses represent dashes.
+
+The design uses a compact Morse binary-tree/path architecture, shared timing logic, and FSM-based control to reduce hardware resources and target Tiny Tapeout constraints.
 # Tiny Tapeout Verilog Project Template
 
 - [Read the documentation for project](docs/info.md)
