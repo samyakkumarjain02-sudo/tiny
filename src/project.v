@@ -331,7 +331,7 @@ end
                         end
                         tree_node <= 1;
                         receiving_char <= 1'b0;
-                        gap_char_done <= 1'b1;
+                       
                     end
                 end
             end
