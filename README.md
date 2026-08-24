@@ -17,7 +17,7 @@ The design supports two modes. Human Mode uses standard Morse timing with timing
 The same chip can operate as a transmitter or receiver. ASCII data is converted to timed Morse pulses for transmission, and received Morse pulses are measured and decoded back into ASCII. Two identical chips can communicate through a single bidirectional Morse channel.
 
 ## Design Summary
-- Top module: tt_um_samyak_morse_codec
+- Top module: tt_um_samyak_krish_morse_codec
 - Technology: SkyWater 130nm
 - Clock: 50 MHz
 - Tile: 1×1
